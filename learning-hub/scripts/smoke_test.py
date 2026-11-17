@@ -85,7 +85,13 @@ def main() -> int:
 
         concept.ensure_dirs()
         concept_session = concept.create_session(today)
-        story = concept.load_bank()[concept_session["story_id"]]
+        concept_bank = concept.load_bank()
+        for item in concept_bank.values():
+            assert_value(len(item["story"]) >= 700, "Concept story is shorter than 700 characters: {}".format(item["id"]))
+            assert_value(item["concept"].lower() not in item["story"].lower(), "Concept name leaked into story: {}".format(item["id"]))
+            assert_value(sum(1 for option in item["options"] if option.get("correct")) == 1, "Concept quiz must have one correct answer: {}".format(item["id"]))
+
+        story = concept_bank[concept_session["story_id"]]
         story_card = concept.story_card(concept_session, story)
         quiz_card = concept.quiz_card(concept_session, story)
         concept_session["page"] = "result"
@@ -93,11 +99,20 @@ def main() -> int:
         result_card = concept.result_card(concept_session, story)
         for card in (story_card, quiz_card, result_card):
             assert_value(encoded_size(card) < 30000, "Concept card exceeds 30 KB")
-        assert_value(len(story["story"]) >= 700, "Concept story is shorter than 700 characters")
-        assert_value(sum(1 for option in story["options"] if option.get("correct")) == 1, "Concept quiz must have one correct answer")
         story_values = [button["behaviors"][0]["value"] for button in iter_buttons(story_card)]
         assert_value(any(value.get("module") == "concept_fable" and value.get("view_id") == 1 for value in story_values), "Concept actions missing module/view")
         assert_value(any(value.get("module") == "hub" and value.get("target") == "english" for value in story_values), "Concept switch button missing")
+
+        concept_session["page"] = "story"
+        concept_session["answer"] = None
+        concept_session["completed"] = False
+        concept.save_session(concept_session)
+        started = concept.callback_card(concept_session, concept_session["story_id"], "start_quiz", concept_session["view_id"])
+        assert_value(started["card"] == concept.quiz_card(concept_session, story), "Concept quiz transition failed")
+        correct_choice = next(option["id"] for option in story["options"] if option["correct"])
+        answered = concept.callback_card(concept_session, concept_session["story_id"], "answer", concept_session["view_id"], correct_choice)
+        assert_value(answered["toast"].get("i18n") is not None and len(answered["toast"]["i18n"]) == 8, "Localized answer toast is incomplete")
+        assert_value(answered["card"] == concept.result_card(concept_session, story), "Concept result transition failed")
 
         hub_card = hub.build_card(today)
         assert_value(encoded_size(hub_card) < 30000, "Learning center card exceeds 30 KB")

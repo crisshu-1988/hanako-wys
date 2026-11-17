@@ -151,7 +151,7 @@ def migrate_legacy_session(session: dict) -> dict:
     return session
 
 
-def build_session(target_date: date) -> dict:
+def build_session(target_date: date, generate_audio: bool = True) -> dict:
     daily.ensure_dirs()
     existing = find_resumable_session(target_date)
     if existing:
@@ -229,7 +229,8 @@ def build_session(target_date: date) -> dict:
         "delivery": {"status": "not_started"},
     }
     session["items"] = [bank[entry["id"]] for entry in queue]
-    session["audio"] = daily.generate_session_audio(session, config)
+    if generate_audio:
+        session["audio"] = daily.generate_session_audio(session, config)
     daily.write_json(daily.STATE_PATH, state)
     daily.write_json(path, session)
     return session
@@ -534,6 +535,17 @@ def ensure_audio_keys(session: dict, only_item_id: Optional[str] = None) -> None
         if only_item_id and item_id != only_item_id:
             continue
         metadata = session.get("audio", {}).get(item_id)
+        if metadata is None:
+            try:
+                generated = daily.generate_session_audio(
+                    session,
+                    daily.load_config(),
+                    only_ids={item_id},
+                )
+            except (daily.DailyError, OSError) as exc:
+                raise FlowError(str(exc)) from exc
+            session.setdefault("audio", {}).update(generated)
+            metadata = generated.get(item_id)
         if metadata and item_id not in keys:
             missing.append(
                 {
@@ -734,7 +746,7 @@ def run(target_date: date) -> int:
     expired = expire_previous_sessions(target_date)
     if expired:
         print("已过期旧会话：{} 个".format(expired))
-    session = find_resumable_session(target_date) or build_session(target_date)
+    session = find_resumable_session(target_date) or build_session(target_date, generate_audio=False)
     result = send_next(session, force=False)
     if result == "waiting_for_answer":
         print("当前题目等待作答，未重复发送。")

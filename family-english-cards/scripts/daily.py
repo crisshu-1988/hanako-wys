@@ -272,7 +272,11 @@ def audio_duration_ms(aiff_path: Path) -> int:
     return fallback
 
 
-def generate_session_audio(session: dict, config: dict) -> Dict[str, dict]:
+def generate_session_audio(
+    session: dict,
+    config: dict,
+    only_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, dict]:
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         raise DailyError(
@@ -283,8 +287,11 @@ def generate_session_audio(session: dict, config: dict) -> Dict[str, dict]:
     day_audio_dir = AUDIO_DIR / session["date"]
     day_audio_dir.mkdir(parents=True, exist_ok=True)
     audio_map: Dict[str, dict] = {}
+    selected = set(only_ids) if only_ids is not None else None
     for index, item in enumerate(session["items"], start=1):
         item_id = item["id"]
+        if selected is not None and item_id not in selected:
+            continue
         opus_path = day_audio_dir / "{:02d}-{}.opus".format(index, item_id)
         if not opus_path.exists():
             aiff_path = day_audio_dir / "{:02d}-{}.aiff".format(index, item_id)
